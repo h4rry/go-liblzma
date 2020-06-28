@@ -1,4 +1,4 @@
-// Copyright 2012 Rémy Oudompheng. All rights reserved.
+// Copyright 2011-2019 Rémy Oudompheng. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -13,17 +13,17 @@ import (
 
 var digits []byte
 
-const shortSize = int(1e5)
+const shortSize = int(2e6)
 
 func init() {
 	buf := new(bytes.Buffer)
 	for i := 0; i < 1e6; i++ {
-		fmt.Fprintf(buf, "%d\n", i)
+		fmt.Fprintf(buf, "%d\n", i*1234567891)
 	}
 	digits = buf.Bytes()
 }
 
-func TestCompress(T *testing.T) {
+func TestCompress(t *testing.T) {
 	d := digits
 	if testing.Short() {
 		d = d[:shortSize]
@@ -33,14 +33,14 @@ func TestCompress(T *testing.T) {
 	enc, err := NewWriter(outbuf, LevelDefault)
 	_, err = enc.Write(d)
 	if err != nil {
-		T.Fatal(err)
+		t.Fatal(err)
 	}
 	enc.Close()
 
-	T.Logf("%d bytes written (compressed size: %d bytes)", len(d), outbuf.Len())
+	t.Logf("%d bytes written (compressed size: %d bytes)", len(d), outbuf.Len())
 }
 
-func TestIdentity(T *testing.T) {
+func TestIdentity(t *testing.T) {
 	d := digits
 	if testing.Short() {
 		d = d[:shortSize]
@@ -50,18 +50,21 @@ func TestIdentity(T *testing.T) {
 	enc, err := NewWriter(tempbuf, LevelDefault)
 	_, err = enc.Write(d)
 	if err != nil {
-		T.Fatal(err)
+		t.Fatal(err)
 	}
 	enc.Close()
+
+	t.Logf("testing %d bytes (compressed size: %d bytes)",
+		len(d), tempbuf.Len())
 
 	dec, _ := NewReader(tempbuf)
 	out, err := ioutil.ReadAll(dec)
 	dec.Close()
 	if err != nil {
-		T.Fatalf("read error: %s", err)
+		t.Fatalf("read error: %s", err)
 	}
 	if !bytes.Equal(d, out) {
-		T.Fatalf("decompressed data not equal to input")
+		t.Fatalf("decompressed data not equal to input")
 	}
 }
 

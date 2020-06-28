@@ -1,4 +1,4 @@
-// Copyright 2012 Rémy Oudompheng. All rights reserved.
+// Copyright 2011-2019 Rémy Oudompheng. All rights reserved.
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
@@ -45,7 +45,36 @@ func NewReader(r io.Reader) (*Decompressor, error) {
 	dec.offset = DefaultBufsize
 	dec.handle = allocLzmaStream(dec.handle)
 	// Initialize decoder
-	ret := C.lzma_auto_decoder(dec.handle, math.MaxUint64, 0)
+	ret := C.lzma_auto_decoder(dec.handle, C.uint64_t(math.MaxUint64),
+		C.uint32_t(concatenated))
+	if Errno(ret) != Ok {
+		return nil, Errno(ret)
+	}
+
+	return dec, nil
+}
+
+
+func NewReaderRaw(r io.Reader, encodedOptions [5]byte) (*Decompressor, error) {
+	dec := new(Decompressor)
+	dec.rd = r
+	dec.buffer = make([]byte, DefaultBufsize)
+	dec.offset = DefaultBufsize
+	dec.handle = allocLzmaStream(dec.handle)
+
+	var filter C.lzma_filter
+	filter.id=C.LZMA_FILTER_LZMA1
+    opts:=(*C.uchar)(unsafe.Pointer(&encodedOptions[0]))
+    ret:=C.lzma_properties_decode(&filter,nil,opts,5)
+    if ret!=0 {
+        return nil,Errno(ret)
+	}
+	var filters [2]C.lzma_filter
+	filters[0]=filter
+	filters[1].id=C.LZMA_VLI_UNKNOWN
+
+	cFilters:=(* C.lzma_filter)(unsafe.Pointer(&filters[0]))
+	ret = C.lzma_raw_decoder(dec.handle, cFilters)
 	if Errno(ret) != Ok {
 		return nil, Errno(ret)
 	}
@@ -83,25 +112,29 @@ func NewReaderRaw(r io.Reader, encodedOptions [5]byte) (*Decompressor, error) {
 
 func (r *Decompressor) Read(out []byte) (out_count int, er error) {
 	if r.offset >= r.length {
-		var n int
-		n, er = r.rd.Read(r.buffer)
-		if n == 0 {
-			return 0, er
+		n, err := r.rd.Read(r.buffer)
+
+		if err != nil && err != io.EOF {
+			return 0, err
 		}
 		r.offset, r.length = 0, n
 		r.handle.avail_in = C.size_t(n)
 	}
 	r.handle.avail_out = C.size_t(len(out))
+	action := Run
+	if r.handle.avail_in == 0 {
+		action = Finish
+	}
 	ret := C.go_lzma_code(
 		r.handle,
 		unsafe.Pointer(&r.buffer[r.offset]),
 		unsafe.Pointer(&out[0]),
-		C.lzma_action(Run),
+		C.lzma_action(action),
 	)
 	r.offset = r.length - int(r.handle.avail_in)
 	switch Errno(ret) {
 	case Ok:
-		break
+		er = nil
 	case StreamEnd:
 		er = io.EOF
 	default:
